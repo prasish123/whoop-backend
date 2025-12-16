@@ -23,13 +23,17 @@ let userTokens = {};
 // STEP 1: Initiate Whoop OAuth Login
 // =====================================================
 app.get('/auth/whoop', (req, res) => {
+  console.log('=== Starting Whoop OAuth ===');
+  console.log('Client ID:', WHOOP_CLIENT_ID);
+  console.log('Redirect URI:', REDIRECT_URI);
+  
   const authUrl = `https://api.prod.whoop.com/oauth/oauth2/auth?` +
     `client_id=${WHOOP_CLIENT_ID}` +
     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
     `&response_type=code` +
     `&scope=read:recovery read:sleep read:workout read:cycles read:body_measurement`;
   
-  console.log('Redirecting to Whoop OAuth:', authUrl);
+  console.log('Auth URL:', authUrl);
   res.redirect(authUrl);
 });
 
@@ -37,21 +41,40 @@ app.get('/auth/whoop', (req, res) => {
 // STEP 2: Handle OAuth Callback
 // =====================================================
 app.get('/auth/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, error } = req.query;
+  
+  console.log('=== OAuth Callback Received ===');
+  console.log('Code:', code ? 'Present' : 'Missing');
+  console.log('Error:', error);
+  
+  if (error) {
+    return res.status(400).send(`OAuth Error: ${error}`);
+  }
   
   if (!code) {
     return res.status(400).send('Authorization code missing');
   }
 
   try {
-    // Exchange code for access token
-    const tokenResponse = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', {
-      client_id: WHOOP_CLIENT_ID,
-      client_secret: WHOOP_CLIENT_SECRET,
+    // Exchange code for access token using Basic Auth
+    const params = new URLSearchParams({
       grant_type: 'authorization_code',
       code: code,
       redirect_uri: REDIRECT_URI
     });
+
+    console.log('Exchanging code for token...');
+    const basicAuth = Buffer.from(`${WHOOP_CLIENT_ID}:${WHOOP_CLIENT_SECRET}`).toString('base64');
+    
+    const tokenResponse = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', 
+      params.toString(), 
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basicAuth}`
+        }
+      }
+    );
 
     const { access_token, refresh_token, expires_in } = tokenResponse.data;
     
@@ -66,20 +89,44 @@ app.get('/auth/callback', async (req, res) => {
     
     res.send(`
       <html>
-        <body style="font-family: Arial; text-align: center; padding: 50px;">
-          <h1 style="color: #10b981;">✅ Connected to Whoop!</h1>
-          <p>You can close this window and return to your tracker.</p>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Connected to Whoop</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; margin: 0;">
+          <div style="background: white; padding: 40px; border-radius: 20px; max-width: 500px; margin: 0 auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+            <h1 style="color: #10b981; font-size: 3em; margin: 0;">✅</h1>
+            <h2 style="color: #333; margin: 20px 0;">Connected to Whoop!</h2>
+            <p style="color: #666; font-size: 1.1em;">You can close this window and return to your tracker.</p>
+            <p style="color: #999; font-size: 0.9em; margin-top: 30px;">Redirecting in 3 seconds...</p>
+          </div>
           <script>
             setTimeout(() => {
-              window.location.href = '${REDIRECT_URI.replace('/auth/callback', '')}';
-            }, 2000);
+              window.location.href = 'https://prasish123.github.io/beachbody-tracker/';
+            }, 3000);
           </script>
         </body>
       </html>
     `);
   } catch (error) {
-    console.error('Error exchanging code for token:', error.response?.data || error.message);
-    res.status(500).send('Authentication failed');
+    console.error('❌ Error exchanging code for token:');
+    console.error('Status:', error.response?.status);
+    console.error('Data:', error.response?.data);
+    console.error('Message:', error.message);
+    
+    res.status(500).send(`
+      <html>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <h1 style="color: #ef4444;">❌ Authentication Failed</h1>
+          <p>Error: ${error.response?.data?.error || error.message}</p>
+          <p style="color: #666; font-size: 0.9em;">${error.response?.data?.error_description || ''}</p>
+          <button onclick="window.location.href='/auth/whoop'" style="margin-top: 20px; padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+            Try Again
+          </button>
+        </body>
+      </html>
+    `);
   }
 });
 
@@ -94,21 +141,32 @@ async function refreshAccessToken() {
   }
 
   try {
-    const response = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', {
-      client_id: WHOOP_CLIENT_ID,
-      client_secret: WHOOP_CLIENT_SECRET,
+    const params = new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: tokens.refreshToken
     });
+
+    const basicAuth = Buffer.from(`${WHOOP_CLIENT_ID}:${WHOOP_CLIENT_SECRET}`).toString('base64');
+    
+    const response = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', 
+      params.toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basicAuth}`
+        }
+      }
+    );
 
     const { access_token, refresh_token, expires_in } = response.data;
     
     userTokens['default'] = {
       accessToken: access_token,
-      refreshToken: refresh_token,
+      refreshToken: refresh_token || tokens.refreshToken,
       expiresAt: Date.now() + (expires_in * 1000)
     };
 
+    console.log('✅ Token refreshed successfully');
     return access_token;
   } catch (error) {
     console.error('Error refreshing token:', error.response?.data || error.message);
@@ -160,7 +218,10 @@ app.get('/api/recovery/:date?', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching recovery:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to fetch recovery data' });
+    res.status(error.response?.status || 500).json({ 
+      error: 'Failed to fetch recovery data',
+      details: error.response?.data || error.message
+    });
   }
 });
 
@@ -191,7 +252,10 @@ app.get('/api/sleep/:date?', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching sleep:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to fetch sleep data' });
+    res.status(error.response?.status || 500).json({ 
+      error: 'Failed to fetch sleep data',
+      details: error.response?.data || error.message
+    });
   }
 });
 
@@ -221,7 +285,10 @@ app.get('/api/strain/:date?', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching strain:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to fetch strain data' });
+    res.status(error.response?.status || 500).json({ 
+      error: 'Failed to fetch strain data',
+      details: error.response?.data || error.message
+    });
   }
 });
 
@@ -250,7 +317,7 @@ app.get('/api/workouts/:date?', async (req, res) => {
       workouts: workouts.map(w => ({
         id: w.id,
         sportId: w.sport_id,
-        duration: Math.round(w.score?.duration / 60), // Convert to minutes
+        duration: Math.round(w.score?.duration / 60),
         strain: w.score?.strain || null,
         averageHeartRate: w.score?.average_heart_rate || null,
         calories: w.score?.kilojoule ? Math.round(w.score.kilojoule / 4.184) : null,
@@ -259,7 +326,10 @@ app.get('/api/workouts/:date?', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching workouts:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to fetch workout data' });
+    res.status(error.response?.status || 500).json({ 
+      error: 'Failed to fetch workout data',
+      details: error.response?.data || error.message
+    });
   }
 });
 
@@ -270,6 +340,8 @@ app.get('/api/today', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
+    
+    console.log('Fetching today\'s data for:', today);
     
     // Fetch all data in parallel
     const [recovery, sleep, strain, workouts] = await Promise.allSettled([
@@ -317,6 +389,13 @@ app.get('/api/today', async (req, res) => {
       }))
     } : null;
 
+    console.log('Successfully fetched data:', {
+      recovery: !!recoveryData,
+      sleep: !!sleepData,
+      strain: !!strainData,
+      workouts: !!workoutsData
+    });
+
     res.json({
       date: today,
       recovery: recoveryData,
@@ -326,7 +405,10 @@ app.get('/api/today', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching today\'s data:', error.message);
-    res.status(500).json({ error: 'Failed to fetch data' });
+    res.status(500).json({ 
+      error: 'Failed to fetch data',
+      details: error.message
+    });
   }
 });
 
@@ -359,14 +441,17 @@ app.listen(PORT, '0.0.0.0', () => {
   4. Start fetching data!
   
   📊 Available Endpoints:
-  - GET /api/recovery/:date    - Recovery score, HRV, RHR
-  - GET /api/sleep/:date        - Sleep performance & quality
-  - GET /api/strain/:date       - Daily strain & calories
-  - GET /api/workouts/:date     - Workout details
-  - GET /api/today              - All today's data combined
+  - GET /auth/whoop              - Start OAuth flow
+  - GET /api/recovery/:date      - Recovery score, HRV, RHR
+  - GET /api/sleep/:date         - Sleep performance & quality
+  - GET /api/strain/:date        - Daily strain & calories
+  - GET /api/workouts/:date      - Workout details
+  - GET /api/today               - All today's data combined
+  - GET /health                  - Server health check
   
   ⚙️  Configuration:
-  - Client ID: ${WHOOP_CLIENT_ID.substring(0, 10)}...
+  - Client ID: ${WHOOP_CLIENT_ID ? WHOOP_CLIENT_ID.substring(0, 10) + '...' : 'NOT SET'}
+  - Client Secret: ${WHOOP_CLIENT_SECRET && WHOOP_CLIENT_SECRET !== 'YOUR_CLIENT_SECRET_HERE' ? '***SET***' : 'NOT SET'}
   - Redirect URI: ${REDIRECT_URI}
   
   ========================================
