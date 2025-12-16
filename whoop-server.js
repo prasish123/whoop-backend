@@ -1,5 +1,4 @@
-// whoop-server.js - CORRECT V2 API IMPLEMENTATION
-// Recovery data is accessed through CYCLES, not directly
+// whoop-server.js - COMPLETE WITH ALL TEST ENDPOINTS
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -73,7 +72,16 @@ app.get('/auth/callback', async (req, res) => {
       <html>
         <body style="text-align:center; padding:50px; font-family: Arial;">
           <h1 style="color: #10b981;">✅ Whoop Connected!</h1>
-          <p>You can close this window and return to your tracker.</p>
+          <p>You can close this window and test endpoints.</p>
+          <h3>Test These URLs:</h3>
+          <ul style="text-align: left; max-width: 600px; margin: 20px auto;">
+            <li><a href="/health" target="_blank">/health</a> - Check auth status</li>
+            <li><a href="/api/profile" target="_blank">/api/profile</a> - User profile</li>
+            <li><a href="/api/body" target="_blank">/api/body</a> - Body measurements</li>
+            <li><a href="/api/cycle-latest" target="_blank">/api/cycle-latest</a> - Latest cycle</li>
+            <li><a href="/api/sleep-all" target="_blank">/api/sleep-all</a> - Recent sleep</li>
+            <li><a href="/api/workouts-all" target="_blank">/api/workouts-all</a> - Recent workouts</li>
+          </ul>
         </body>
       </html>
     `);
@@ -118,81 +126,132 @@ async function getValidAccessToken() {
   return tokens.accessToken;
 }
 
-// CORRECT IMPLEMENTATION: Get recovery via cycle
+// =====================
+// TEST ENDPOINTS
+// =====================
+
+// 1. User Profile (should ALWAYS work)
+app.get('/api/profile', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    console.log('📞 Calling /v2/user/profile/basic');
+    
+    const response = await axios.get('https://api.prod.whoop.com/v2/user/profile/basic', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    
+    console.log('✅ Profile success:', response.data);
+    res.json(response.data);
+  } catch (err) {
+    console.error('❌ Profile error:', err.response?.status, err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      status: err.response?.status,
+      details: err.response?.data 
+    });
+  }
+});
+
+// 2. Body Measurements (should work)
+app.get('/api/body', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    console.log('📞 Calling /v2/user/measurement/body');
+    
+    const response = await axios.get('https://api.prod.whoop.com/v2/user/measurement/body', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    
+    console.log('✅ Body measurements success:', response.data);
+    res.json(response.data);
+  } catch (err) {
+    console.error('❌ Body error:', err.response?.status, err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      status: err.response?.status,
+      details: err.response?.data 
+    });
+  }
+});
+
+// 3. Latest Cycle
+app.get('/api/cycle-latest', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    console.log('📞 Calling /v2/cycle (limit 1)');
+    
+    const response = await axios.get('https://api.prod.whoop.com/v2/cycle', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 1 }
+    });
+    
+    console.log('✅ Cycle success:', response.data);
+    res.json(response.data);
+  } catch (err) {
+    console.error('❌ Cycle error:', err.response?.status, err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      status: err.response?.status,
+      details: err.response?.data 
+    });
+  }
+});
+
+// 4. Recent Sleep
+app.get('/api/sleep-all', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    console.log('📞 Calling /v2/activity/sleep (limit 5)');
+    
+    const response = await axios.get('https://api.prod.whoop.com/v2/activity/sleep', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 5 }
+    });
+    
+    console.log('✅ Sleep success:', response.data);
+    res.json(response.data);
+  } catch (err) {
+    console.error('❌ Sleep error:', err.response?.status, err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      status: err.response?.status,
+      details: err.response?.data 
+    });
+  }
+});
+
+// 5. Recent Workouts
+app.get('/api/workouts-all', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    console.log('📞 Calling /v2/activity/workout (limit 5)');
+    
+    const response = await axios.get('https://api.prod.whoop.com/v2/activity/workout', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 5 }
+    });
+    
+    console.log('✅ Workout success:', response.data);
+    res.json(response.data);
+  } catch (err) {
+    console.error('❌ Workout error:', err.response?.status, err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      status: err.response?.status,
+      details: err.response?.data 
+    });
+  }
+});
+
+// =====================
+// ACTUAL API ENDPOINTS (for tracker)
+// =====================
+
 app.get('/api/recovery/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
     
-    console.log('📅 Getting cycle for date:', date);
-    
-    // Step 1: Get cycle for the date
-    const start = `${date}T00:00:00.000Z`;
-    const end = `${date}T23:59:59.999Z`;
-    
-    const cycleResponse = await axios.get('https://api.prod.whoop.com/v2/cycle', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { start, end, limit: 1 }
-    });
-
-    const cycles = cycleResponse.data.records || [];
-    if (cycles.length === 0) {
-      return res.status(404).json({ error: 'No cycle data for this date', date });
-    }
-
-    const cycle = cycles[0];
-    const cycleId = cycle.id;
-    
-    console.log('✅ Found cycle ID:', cycleId);
-
-    // Step 2: Get recovery for the cycle
-    try {
-      const recoveryResponse = await axios.get(`https://api.prod.whoop.com/v2/cycle/${cycleId}/recovery`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-
-      const recoveryData = recoveryResponse.data;
-      
-      res.json({
-        date,
-        cycleId: cycleId,
-        recoveryScore: recoveryData.score?.recovery_score || null,
-        hrv: recoveryData.score?.hrv_rmssd_milli || null,
-        restingHeartRate: recoveryData.score?.resting_heart_rate || null,
-        spo2: recoveryData.score?.spo2_percentage || null,
-        skinTemp: recoveryData.score?.skin_temp_celsius || null,
-        userCalibrating: recoveryData.score?.user_calibrating || false
-      });
-    } catch (recoveryErr) {
-      // Cycle exists but no recovery yet (user didn't wear strap previous night)
-      if (recoveryErr.response?.status === 404) {
-        return res.status(404).json({ 
-          error: 'No recovery data for this cycle', 
-          date,
-          cycleId,
-          message: 'User may not have worn strap during sleep' 
-        });
-      }
-      throw recoveryErr;
-    }
-  } catch (err) {
-    console.error('❌ Recovery error:', err.response?.status, err.response?.data || err.message);
-    res.status(err.response?.status || 500).json({ 
-      error: 'Failed to fetch recovery',
-      details: err.response?.data || err.message 
-    });
-  }
-});
-
-// Get sleep via cycle
-app.get('/api/sleep/:date?', async (req, res) => {
-  try {
-    const date = req.params.date || new Date().toISOString().split('T')[0];
-    const accessToken = await getValidAccessToken();
-    
-    console.log('📅 Getting sleep for date:', date);
-    
-    // Get cycle for the date
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
     
@@ -208,36 +267,38 @@ app.get('/api/sleep/:date?', async (req, res) => {
 
     const cycleId = cycles[0].id;
 
-    // Get sleep for the cycle
-    const sleepResponse = await axios.get(`https://api.prod.whoop.com/v2/cycle/${cycleId}/sleep`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
+    try {
+      const recoveryResponse = await axios.get(`https://api.prod.whoop.com/v2/cycle/${cycleId}/recovery`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
 
-    const sleepData = sleepResponse.data;
-    
-    res.json({
-      date,
-      sleepPerformance: sleepData.score?.sleep_performance_percentage || null,
-      sleepEfficiency: sleepData.score?.sleep_efficiency_percentage || null,
-      sleepConsistency: sleepData.score?.sleep_consistency_percentage || null,
-      respiratoryRate: sleepData.score?.respiratory_rate || null
-    });
+      const recoveryData = recoveryResponse.data;
+      
+      res.json({
+        date,
+        recoveryScore: recoveryData.score?.recovery_score || null,
+        hrv: recoveryData.score?.hrv_rmssd_milli || null,
+        restingHeartRate: recoveryData.score?.resting_heart_rate || null,
+        spo2: recoveryData.score?.spo2_percentage || null
+      });
+    } catch (recoveryErr) {
+      if (recoveryErr.response?.status === 404) {
+        return res.status(404).json({ error: 'No recovery data for this cycle', date });
+      }
+      throw recoveryErr;
+    }
   } catch (err) {
-    console.error('❌ Sleep error:', err.response?.status, err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
-      error: 'Failed to fetch sleep',
+      error: 'Failed to fetch recovery',
       details: err.response?.data || err.message 
     });
   }
 });
 
-// Get strain (cycle data directly)
 app.get('/api/strain/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
-    
-    console.log('📅 Getting strain for date:', date);
     
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
@@ -261,7 +322,6 @@ app.get('/api/strain/:date?', async (req, res) => {
       maxHeartRate: data.score?.max_heart_rate || null
     });
   } catch (err) {
-    console.error('❌ Strain error:', err.response?.status, err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
       error: 'Failed to fetch strain',
       details: err.response?.data || err.message 
@@ -269,22 +329,42 @@ app.get('/api/strain/:date?', async (req, res) => {
   }
 });
 
-// Test endpoint - get latest cycle
-app.get('/api/cycle-latest', async (req, res) => {
+app.get('/api/sleep/:date?', async (req, res) => {
   try {
+    const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
     
-    const response = await axios.get('https://api.prod.whoop.com/v2/cycle', {
+    const start = `${date}T00:00:00.000Z`;
+    const end = `${date}T23:59:59.999Z`;
+    
+    const cycleResponse = await axios.get('https://api.prod.whoop.com/v2/cycle', {
       headers: { Authorization: `Bearer ${accessToken}` },
-      params: { limit: 1 }
+      params: { start, end, limit: 1 }
     });
 
-    res.json(response.data);
+    const cycles = cycleResponse.data.records || [];
+    if (cycles.length === 0) {
+      return res.status(404).json({ error: 'No cycle data for this date', date });
+    }
+
+    const cycleId = cycles[0].id;
+
+    const sleepResponse = await axios.get(`https://api.prod.whoop.com/v2/cycle/${cycleId}/sleep`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+
+    const sleepData = sleepResponse.data;
+    
+    res.json({
+      date,
+      sleepPerformance: sleepData.score?.sleep_performance_percentage || null,
+      sleepEfficiency: sleepData.score?.sleep_efficiency_percentage || null,
+      respiratoryRate: sleepData.score?.respiratory_rate || null
+    });
   } catch (err) {
-    console.error('Cycle error:', err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
-      error: err.message,
-      details: err.response?.data 
+      error: 'Failed to fetch sleep',
+      details: err.response?.data || err.message 
     });
   }
 });
@@ -298,5 +378,6 @@ app.get('/health', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ WHOOP backend (CORRECT V2 implementation) running on port ${PORT}`);
+  console.log(`✅ WHOOP backend running on port ${PORT}`);
+  console.log(`🧪 Test endpoints at /api/profile, /api/body, /api/cycle-latest, etc.`);
 });
