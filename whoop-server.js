@@ -13,7 +13,7 @@ app.use(express.json());
 // Configuration - Add your credentials here
 const WHOOP_CLIENT_ID = process.env.WHOOP_CLIENT_ID || 'YOUR_CLIENT_ID_HERE';
 const WHOOP_CLIENT_SECRET = process.env.WHOOP_CLIENT_SECRET || 'YOUR_CLIENT_SECRET_HERE';
-const REDIRECT_URI = process.env.REDIRECT_URI || 'https://prasish123.github.io/beachbody-tracker/';
+const REDIRECT_URI = process.env.REDIRECT_URI || 'https://whoop-backend-production.up.railway.app/auth/callback';
 const PORT = process.env.PORT || 3000;
 
 // In-memory token storage (use database in production)
@@ -22,28 +22,12 @@ let userTokens = {};
 // =====================================================
 // STEP 1: Initiate Whoop OAuth Login
 // =====================================================
-// app.get('/auth/whoop', (req, res) => {
-//   const authUrl = `https://api.whoop.com/oauth/authorize?` +
-//     `client_id=${WHOOP_CLIENT_ID}` +
-//     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-//     `&response_type=code` +
-//     `&scope=read:recovery read:sleep read:workout read:cycles read:body_measurement`;
-  
-//   res.redirect(authUrl);
-// });
-
-
-// STEP 1: Initiate Whoop OAuth Login
 app.get('/auth/whoop', (req, res) => {
-  // Build authorization URL with proper encoding
-  const params = new URLSearchParams({
-    client_id: WHOOP_CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    response_type: 'code',
-    scope: 'read:recovery read:sleep read:workout read:cycles read:body_measurement'
-  });
-  
-  const authUrl = `https://api.whoop.com/oauth/authorize?${params.toString()}`;
+  const authUrl = `https://api.prod.whoop.com/oauth/oauth2/auth?` +
+    `client_id=${WHOOP_CLIENT_ID}` +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&response_type=code` +
+    `&scope=read:recovery read:sleep read:workout read:cycles read:body_measurement`;
   
   console.log('Redirecting to Whoop OAuth:', authUrl);
   res.redirect(authUrl);
@@ -61,7 +45,7 @@ app.get('/auth/callback', async (req, res) => {
 
   try {
     // Exchange code for access token
-    const tokenResponse = await axios.post('https://api.whoop.com/oauth/token', {
+    const tokenResponse = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', {
       client_id: WHOOP_CLIENT_ID,
       client_secret: WHOOP_CLIENT_SECRET,
       grant_type: 'authorization_code',
@@ -87,7 +71,7 @@ app.get('/auth/callback', async (req, res) => {
           <p>You can close this window and return to your tracker.</p>
           <script>
             setTimeout(() => {
-              window.location.href = '${REDIRECT_URI}';
+              window.location.href = '${REDIRECT_URI.replace('/auth/callback', '')}';
             }, 2000);
           </script>
         </body>
@@ -110,7 +94,7 @@ async function refreshAccessToken() {
   }
 
   try {
-    const response = await axios.post('https://api.whoop.com/oauth/token', {
+    const response = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', {
       client_id: WHOOP_CLIENT_ID,
       client_secret: WHOOP_CLIENT_SECRET,
       grant_type: 'refresh_token',
@@ -159,7 +143,7 @@ app.get('/api/recovery/:date?', async (req, res) => {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
 
-    const response = await axios.get(`https://api.whoop.com/v1/recovery/${date}`, {
+    const response = await axios.get(`https://api.prod.whoop.com/developer/v1/recovery/${date}`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`
       }
@@ -188,7 +172,7 @@ app.get('/api/sleep/:date?', async (req, res) => {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
 
-    const response = await axios.get(`https://api.whoop.com/v1/activity/sleep/${date}`, {
+    const response = await axios.get(`https://api.prod.whoop.com/developer/v1/activity/sleep/${date}`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`
       }
@@ -219,7 +203,7 @@ app.get('/api/strain/:date?', async (req, res) => {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
 
-    const response = await axios.get(`https://api.whoop.com/v1/cycle/${date}`, {
+    const response = await axios.get(`https://api.prod.whoop.com/developer/v1/cycle/${date}`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`
       }
@@ -249,7 +233,7 @@ app.get('/api/workouts/:date?', async (req, res) => {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
 
-    const response = await axios.get(`https://api.whoop.com/v1/activity/workout`, {
+    const response = await axios.get(`https://api.prod.whoop.com/developer/v1/activity/workout`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`
       },
@@ -285,21 +269,60 @@ app.get('/api/workouts/:date?', async (req, res) => {
 app.get('/api/today', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
+    const accessToken = await getValidAccessToken();
     
     // Fetch all data in parallel
     const [recovery, sleep, strain, workouts] = await Promise.allSettled([
-      axios.get(`http://localhost:${PORT}/api/recovery/${today}`),
-      axios.get(`http://localhost:${PORT}/api/sleep/${today}`),
-      axios.get(`http://localhost:${PORT}/api/strain/${today}`),
-      axios.get(`http://localhost:${PORT}/api/workouts/${today}`)
+      axios.get(`https://api.prod.whoop.com/developer/v1/recovery/${today}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      }),
+      axios.get(`https://api.prod.whoop.com/developer/v1/activity/sleep/${today}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      }),
+      axios.get(`https://api.prod.whoop.com/developer/v1/cycle/${today}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      }),
+      axios.get(`https://api.prod.whoop.com/developer/v1/activity/workout`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        params: {
+          start: `${today}T00:00:00.000Z`,
+          end: `${today}T23:59:59.999Z`
+        }
+      })
     ]);
+
+    // Process recovery
+    const recoveryData = recovery.status === 'fulfilled' ? {
+      recoveryScore: recovery.value.data.score?.recovery_score || null,
+      hrv: recovery.value.data.score?.hrv_rmssd || null,
+      restingHeartRate: recovery.value.data.score?.resting_heart_rate || null
+    } : null;
+
+    // Process sleep
+    const sleepData = sleep.status === 'fulfilled' ? {
+      sleepPerformance: sleep.value.data.score?.sleep_performance_percentage || null,
+      quality: sleep.value.data.score?.sleep_efficiency_percentage || null
+    } : null;
+
+    // Process strain
+    const strainData = strain.status === 'fulfilled' ? {
+      strain: strain.value.data.score?.strain || null,
+      calories: strain.value.data.score?.kilojoule ? Math.round(strain.value.data.score.kilojoule / 4.184) : null
+    } : null;
+
+    // Process workouts
+    const workoutsData = workouts.status === 'fulfilled' ? {
+      workouts: (workouts.value.data.records || []).map(w => ({
+        duration: Math.round(w.score?.duration / 60)
+      }))
+    } : null;
 
     res.json({
       date: today,
-      recovery: recovery.status === 'fulfilled' ? recovery.value.data : null,
-      sleep: sleep.status === 'fulfilled' ? sleep.value.data : null,
-      strain: strain.status === 'fulfilled' ? strain.value.data : null,
-      workouts: workouts.status === 'fulfilled' ? workouts.value.data : null
+      recovery: recoveryData,
+      sleep: sleepData,
+      strain: strainData,
+      workouts: workoutsData
     });
   } catch (error) {
     console.error('Error fetching today\'s data:', error.message);
@@ -321,17 +344,16 @@ app.get('/health', (req, res) => {
 // =====================================================
 // Start Server
 // =====================================================
-//app.listen(PORT, () => {
-app.listen(PORT, '0.0.0.0', () => {  
-console.log(`
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`
   ========================================
   🚀 Whoop Integration Server Running!
   ========================================
   
-  Server: http://localhost:${PORT}
+  Server: https://whoop-backend-production.up.railway.app
   
   📝 Setup Steps:
-  1. Visit: http://localhost:${PORT}/auth/whoop
+  1. Visit: https://whoop-backend-production.up.railway.app/auth/whoop
   2. Login with your Whoop account
   3. Authorize the app
   4. Start fetching data!
