@@ -1,4 +1,4 @@
-// whoop-server.js - FIXED FOR V2 API
+// whoop-server.js - COMPLETE V2 API with Debug Endpoints
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -76,6 +76,8 @@ app.get('/auth/callback', async (req, res) => {
       expiresAt: Date.now() + expires_in * 1000
     };
 
+    console.log('✅ User authenticated successfully');
+
     res.send(`
       <html>
         <body style="text-align:center; padding:50px; font-family: Arial;">
@@ -86,7 +88,7 @@ app.get('/auth/callback', async (req, res) => {
       </html>
     `);
   } catch (err) {
-    console.error(err.response?.data || err.message);
+    console.error('Auth error:', err.response?.data || err.message);
     res.status(500).send('OAuth token exchange failed');
   }
 });
@@ -132,13 +134,81 @@ async function getValidAccessToken() {
 }
 
 // =======================
-// V2 API ENDPOINTS (FIXED)
+// TEST/DEBUG ENDPOINTS
+// =======================
+
+// Get ALL recoveries (no date filter) - for debugging
+app.get('/api/recovery-all', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    
+    const response = await axios.get('https://api.prod.whoop.com/v2/recovery', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 10 }
+    });
+
+    const records = response.data.records || [];
+    
+    res.json({
+      count: records.length,
+      records: records.map(r => ({
+        cycle_id: r.cycle_id,
+        created_at: r.created_at,
+        score: r.score?.recovery_score,
+        user_calibrating: r.score?.user_calibrating
+      })),
+      raw_first_record: records[0]
+    });
+  } catch (err) {
+    console.error('Error fetching all recoveries:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      details: err.response?.data 
+    });
+  }
+});
+
+// Get ALL cycles (no date filter) - for debugging
+app.get('/api/cycle-all', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    
+    const response = await axios.get('https://api.prod.whoop.com/v2/cycle', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { limit: 10 }
+    });
+
+    const records = response.data.records || [];
+    
+    res.json({
+      count: records.length,
+      records: records.map(r => ({
+        id: r.id,
+        start: r.start,
+        end: r.end,
+        strain: r.score?.strain
+      })),
+      raw_first_record: records[0]
+    });
+  } catch (err) {
+    console.error('Error fetching all cycles:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      details: err.response?.data 
+    });
+  }
+});
+
+// =======================
+// V2 API ENDPOINTS
 // =======================
 
 app.get('/api/recovery/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
+    
+    console.log('📅 Fetching recovery for date:', date);
     
     // V2 API uses query parameters with ISO timestamps
     const start = `${date}T00:00:00.000Z`;
@@ -150,6 +220,8 @@ app.get('/api/recovery/:date?', async (req, res) => {
     });
 
     const records = response.data.records || [];
+    console.log(`📊 Found ${records.length} recovery records`);
+    
     if (records.length === 0) {
       return res.status(404).json({ error: 'No recovery data for this date' });
     }
@@ -164,7 +236,7 @@ app.get('/api/recovery/:date?', async (req, res) => {
       skinTemp: data.score?.skin_temp_celsius || null
     });
   } catch (err) {
-    console.error('Recovery error:', err.response?.data || err.message);
+    console.error('❌ Recovery error:', err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
       error: 'Failed to fetch recovery', 
       details: err.response?.data || err.message 
@@ -177,6 +249,8 @@ app.get('/api/sleep/:date?', async (req, res) => {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
     
+    console.log('📅 Fetching sleep for date:', date);
+    
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
     
@@ -186,6 +260,8 @@ app.get('/api/sleep/:date?', async (req, res) => {
     });
 
     const records = response.data.records || [];
+    console.log(`📊 Found ${records.length} sleep records`);
+    
     if (records.length === 0) {
       return res.status(404).json({ error: 'No sleep data for this date' });
     }
@@ -202,7 +278,7 @@ app.get('/api/sleep/:date?', async (req, res) => {
       lightSleep: data.score?.stage_summary?.light_sleep_duration_milli || null
     });
   } catch (err) {
-    console.error('Sleep error:', err.response?.data || err.message);
+    console.error('❌ Sleep error:', err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
       error: 'Failed to fetch sleep', 
       details: err.response?.data || err.message 
@@ -215,6 +291,8 @@ app.get('/api/strain/:date?', async (req, res) => {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
     
+    console.log('📅 Fetching strain for date:', date);
+    
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
     
@@ -224,6 +302,8 @@ app.get('/api/strain/:date?', async (req, res) => {
     });
 
     const records = response.data.records || [];
+    console.log(`📊 Found ${records.length} cycle records`);
+    
     if (records.length === 0) {
       return res.status(404).json({ error: 'No cycle data for this date' });
     }
@@ -237,7 +317,7 @@ app.get('/api/strain/:date?', async (req, res) => {
       maxHeartRate: data.score?.max_heart_rate || null
     });
   } catch (err) {
-    console.error('Strain error:', err.response?.data || err.message);
+    console.error('❌ Strain error:', err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
       error: 'Failed to fetch strain', 
       details: err.response?.data || err.message 
@@ -250,6 +330,8 @@ app.get('/api/workouts/:date?', async (req, res) => {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
     
+    console.log('📅 Fetching workouts for date:', date);
+    
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
     
@@ -259,13 +341,15 @@ app.get('/api/workouts/:date?', async (req, res) => {
     });
 
     const workouts = response.data.records || [];
+    console.log(`📊 Found ${workouts.length} workout records`);
+    
     res.json({
       date,
       workouts: workouts.map(w => ({
         id: w.id,
         sportName: w.sport_name,
         sportId: w.sport_id,
-        duration: Math.round((new Date(w.end) - new Date(w.start)) / 60000), // minutes
+        duration: Math.round((new Date(w.end) - new Date(w.start)) / 60000),
         strain: w.score?.strain || null,
         averageHeartRate: w.score?.average_heart_rate || null,
         maxHeartRate: w.score?.max_heart_rate || null,
@@ -275,7 +359,7 @@ app.get('/api/workouts/:date?', async (req, res) => {
       }))
     });
   } catch (err) {
-    console.error('Workouts error:', err.response?.data || err.message);
+    console.error('❌ Workouts error:', err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
       error: 'Failed to fetch workouts', 
       details: err.response?.data || err.message 
@@ -284,7 +368,11 @@ app.get('/api/workouts/:date?', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, authenticated: !!userTokens.default });
+  res.json({ 
+    ok: true, 
+    authenticated: !!userTokens.default,
+    tokenExpiry: userTokens.default ? new Date(userTokens.default.expiresAt).toISOString() : null
+  });
 });
 
 // =======================
@@ -292,4 +380,5 @@ app.get('/health', (req, res) => {
 // =======================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ WHOOP backend (V2 API) running on port ${PORT}`);
+  console.log(`📍 Redirect URI: ${REDIRECT_URI}`);
 });
