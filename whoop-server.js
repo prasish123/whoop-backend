@@ -3,11 +3,13 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const crypto = require('crypto');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
 
 // =======================
 // CONFIGURATION
@@ -17,16 +19,17 @@ const WHOOP_CLIENT_SECRET = process.env.WHOOP_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'https://whoop-backend-production.up.railway.app/auth/callback';
 const PORT = process.env.PORT || 3000;
 
-// In-memory storage
+// In-memory token storage
 let userTokens = {};
-let oauthStateStore = {}; // temporary state storage for CSRF protection
 
 // =======================
 // STEP 1: Initiate OAuth
 // =======================
 app.get('/auth/whoop', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
-  oauthStateStore[state] = Date.now(); // store temporarily
+
+  // Save state in cookie (httpOnly + secure recommended for prod)
+  res.cookie('oauth_state', state, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
 
   const authUrl =
     'https://api.prod.whoop.com/oauth/oauth2/auth?' +
@@ -44,12 +47,14 @@ app.get('/auth/whoop', (req, res) => {
 // =======================
 app.get('/auth/callback', async (req, res) => {
   const { code, state, error } = req.query;
+  const cookieState = req.cookies.oauth_state;
 
   if (error) return res.status(400).send(`OAuth error: ${error}`);
   if (!code) return res.status(400).send('Missing authorization code');
-  if (!state || !oauthStateStore[state]) return res.status(400).send('Invalid state');
+  if (!state || state !== cookieState) return res.status(400).send('Invalid state');
 
-  delete oauthStateStore[state]; // cleanup used state
+  // Clear state cookie
+  res.clearCookie('oauth_state');
 
   try {
     const params = new URLSearchParams({
@@ -74,7 +79,14 @@ app.get('/auth/callback', async (req, res) => {
       expiresAt: Date.now() + expires_in * 1000
     };
 
-    res.send('✅ WHOOP connected successfully');
+    res.send(`
+      <html>
+        <body style="text-align:center; padding:50px;">
+          <h1>✅ Whoop Connected!</h1>
+          <p>You can close this window and return to your tracker.</p>
+        </body>
+      </html>
+    `);
   } catch (err) {
     console.error(err.response?.data || err.message);
     res.status(500).send('OAuth token exchange failed');
@@ -116,9 +128,7 @@ async function getValidAccessToken() {
   const tokens = userTokens.default;
   if (!tokens) throw new Error('Not authenticated');
 
-  if (Date.now() >= tokens.expiresAt - 300000) { // refresh 5 mins before expiry
-    return refreshAccessToken();
-  }
+  if (Date.now() >= tokens.expiresAt - 300000) return refreshAccessToken();
 
   return tokens.accessToken;
 }
@@ -127,16 +137,13 @@ async function getValidAccessToken() {
 // API ENDPOINTS
 // =======================
 
-// Today's Recovery Data
 app.get('/api/recovery/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
-
     const response = await axios.get(`https://api.prod.whoop.com/developer/v1/recovery/${date}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
-
     const data = response.data;
 
     res.json({
@@ -152,16 +159,13 @@ app.get('/api/recovery/:date?', async (req, res) => {
   }
 });
 
-// Sleep Data
 app.get('/api/sleep/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
-
     const response = await axios.get(`https://api.prod.whoop.com/developer/v1/activity/sleep/${date}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
-
     const data = response.data;
 
     res.json({
@@ -178,16 +182,13 @@ app.get('/api/sleep/:date?', async (req, res) => {
   }
 });
 
-// Strain Data
 app.get('/api/strain/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
-
     const response = await axios.get(`https://api.prod.whoop.com/developer/v1/cycle/${date}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
-
     const data = response.data;
 
     res.json({
@@ -203,22 +204,16 @@ app.get('/api/strain/:date?', async (req, res) => {
   }
 });
 
-// Workouts
 app.get('/api/workouts/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
-
     const response = await axios.get(`https://api.prod.whoop.com/developer/v1/activity/workout`, {
       headers: { Authorization: `Bearer ${accessToken}` },
-      params: {
-        start: `${date}T00:00:00.000Z`,
-        end: `${date}T23:59:59.999Z`
-      }
+      params: { start: `${date}T00:00:00.000Z`, end: `${date}T23:59:59.999Z` }
     });
 
     const workouts = response.data.records || [];
-
     res.json({
       date,
       workouts: workouts.map(w => ({
@@ -237,33 +232,6 @@ app.get('/api/workouts/:date?', async (req, res) => {
   }
 });
 
-// Combined Today Endpoint
-app.get('/api/today', async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const accessToken = await getValidAccessToken();
-
-    const [recovery, sleep, strain, workouts] = await Promise.allSettled([
-      axios.get(`https://api.prod.whoop.com/developer/v1/recovery/${today}`, { headers: { Authorization: `Bearer ${accessToken}` } }),
-      axios.get(`https://api.prod.whoop.com/developer/v1/activity/sleep/${today}`, { headers: { Authorization: `Bearer ${accessToken}` } }),
-      axios.get(`https://api.prod.whoop.com/developer/v1/cycle/${today}`, { headers: { Authorization: `Bearer ${accessToken}` } }),
-      axios.get(`https://api.prod.whoop.com/developer/v1/activity/workout`, { headers: { Authorization: `Bearer ${accessToken}` }, params: { start: `${today}T00:00:00.000Z`, end: `${today}T23:59:59.999Z` } })
-    ]);
-
-    res.json({
-      date: today,
-      recovery: recovery.status === 'fulfilled' ? recovery.value.data : null,
-      sleep: sleep.status === 'fulfilled' ? sleep.value.data : null,
-      strain: strain.status === 'fulfilled' ? strain.value.data : null,
-      workouts: workouts.status === 'fulfilled' ? workouts.value.data : null
-    });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Failed to fetch today\'s data', details: err.message });
-  }
-});
-
-// Health Check
 app.get('/health', (req, res) => {
   res.json({ ok: true, authenticated: !!userTokens.default });
 });
