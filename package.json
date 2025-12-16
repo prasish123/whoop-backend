@@ -1,0 +1,25 @@
+{
+  "name": "beachbody-whoop-integration",
+  "version": "1.0.0",
+  "description": "Whoop API integration for Beachbody portion control tracker",
+  "main": "whoop-server.js",
+  "scripts": {
+    "start": "node whoop-server.js",
+    "dev": "nodemon whoop-server.js"
+  },
+  "keywords": ["whoop", "fitness", "beachbody", "health-tracking"],
+  "author": "Asish Prasish",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
