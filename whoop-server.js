@@ -22,13 +22,30 @@ let userTokens = {};
 // =====================================================
 // STEP 1: Initiate Whoop OAuth Login
 // =====================================================
-app.get('/auth/whoop', (req, res) => {
-  const authUrl = `https://api.whoop.com/oauth/authorize?` +
-    `client_id=${WHOOP_CLIENT_ID}` +
-    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-    `&response_type=code` +
-    `&scope=read:recovery read:sleep read:workout read:cycles read:body_measurement`;
+// app.get('/auth/whoop', (req, res) => {
+//   const authUrl = `https://api.whoop.com/oauth/authorize?` +
+//     `client_id=${WHOOP_CLIENT_ID}` +
+//     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+//     `&response_type=code` +
+//     `&scope=read:recovery read:sleep read:workout read:cycles read:body_measurement`;
   
+//   res.redirect(authUrl);
+// });
+
+
+// STEP 1: Initiate Whoop OAuth Login
+app.get('/auth/whoop', (req, res) => {
+  // Build authorization URL with proper encoding
+  const params = new URLSearchParams({
+    client_id: WHOOP_CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'read:recovery read:sleep read:workout read:cycles read:body_measurement'
+  });
+  
+  const authUrl = `https://api.whoop.com/oauth/authorize?${params.toString()}`;
+  
+  console.log('Redirecting to Whoop OAuth:', authUrl);
   res.redirect(authUrl);
 });
 
