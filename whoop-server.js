@@ -1,4 +1,4 @@
-// whoop-server.js - COMPLETE V2 API with Debug Endpoints
+// whoop-server.js - COMPLETE FINAL VERSION
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -11,20 +11,13 @@ app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
 
-// =======================
-// CONFIGURATION
-// =======================
 const WHOOP_CLIENT_ID = process.env.WHOOP_CLIENT_ID;
 const WHOOP_CLIENT_SECRET = process.env.WHOOP_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'https://whoop-backend-production.up.railway.app/auth/callback';
 const PORT = process.env.PORT || 3000;
 
-// In-memory token storage
 let userTokens = {};
 
-// =======================
-// STEP 1: Initiate OAuth
-// =======================
 app.get('/auth/whoop', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   res.cookie('oauth_state', state, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
@@ -40,9 +33,6 @@ app.get('/auth/whoop', (req, res) => {
   res.redirect(authUrl);
 });
 
-// =======================
-// STEP 2: OAuth Callback
-// =======================
 app.get('/auth/callback', async (req, res) => {
   const { code, state, error } = req.query;
   const cookieState = req.cookies.oauth_state;
@@ -83,7 +73,6 @@ app.get('/auth/callback', async (req, res) => {
         <body style="text-align:center; padding:50px; font-family: Arial;">
           <h1 style="color: #10b981;">✅ Whoop Connected!</h1>
           <p>You can close this window and return to your tracker.</p>
-          <p style="color: #666; margin-top: 30px;">Your Whoop data will now sync automatically.</p>
         </body>
       </html>
     `);
@@ -93,9 +82,6 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-// =======================
-// TOKEN HELPERS
-// =======================
 async function refreshAccessToken() {
   const tokens = userTokens.default;
   if (!tokens) throw new Error('Not authenticated');
@@ -127,90 +113,53 @@ async function refreshAccessToken() {
 async function getValidAccessToken() {
   const tokens = userTokens.default;
   if (!tokens) throw new Error('Not authenticated');
-
   if (Date.now() >= tokens.expiresAt - 300000) return refreshAccessToken();
-
   return tokens.accessToken;
 }
 
-// =======================
-// TEST/DEBUG ENDPOINTS
-// =======================
+// TEST ENDPOINT - User Profile
+app.get('/api/profile', async (req, res) => {
+  try {
+    const accessToken = await getValidAccessToken();
+    const response = await axios.get('https://api.prod.whoop.com/v2/user/profile/basic', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    res.json(response.data);
+  } catch (err) {
+    console.error('Profile error:', err.response?.status, err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.message,
+      status: err.response?.status,
+      details: err.response?.data 
+    });
+  }
+});
 
-// Get ALL recoveries (no date filter) - for debugging
+// Get last 10 recoveries
 app.get('/api/recovery-all', async (req, res) => {
   try {
     const accessToken = await getValidAccessToken();
-    
     const response = await axios.get('https://api.prod.whoop.com/v2/recovery', {
       headers: { Authorization: `Bearer ${accessToken}` },
       params: { limit: 10 }
     });
-
-    const records = response.data.records || [];
-    
-    res.json({
-      count: records.length,
-      records: records.map(r => ({
-        cycle_id: r.cycle_id,
-        created_at: r.created_at,
-        score: r.score?.recovery_score,
-        user_calibrating: r.score?.user_calibrating
-      })),
-      raw_first_record: records[0]
-    });
+    res.json(response.data);
   } catch (err) {
-    console.error('Error fetching all recoveries:', err.response?.data || err.message);
+    console.error('Recovery-all error:', err.response?.status, err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
       error: err.message,
+      status: err.response?.status,
       details: err.response?.data 
     });
   }
 });
 
-// Get ALL cycles (no date filter) - for debugging
-app.get('/api/cycle-all', async (req, res) => {
-  try {
-    const accessToken = await getValidAccessToken();
-    
-    const response = await axios.get('https://api.prod.whoop.com/v2/cycle', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { limit: 10 }
-    });
-
-    const records = response.data.records || [];
-    
-    res.json({
-      count: records.length,
-      records: records.map(r => ({
-        id: r.id,
-        start: r.start,
-        end: r.end,
-        strain: r.score?.strain
-      })),
-      raw_first_record: records[0]
-    });
-  } catch (err) {
-    console.error('Error fetching all cycles:', err.response?.data || err.message);
-    res.status(err.response?.status || 500).json({ 
-      error: err.message,
-      details: err.response?.data 
-    });
-  }
-});
-
-// =======================
-// V2 API ENDPOINTS
-// =======================
-
+// Get recovery by date
 app.get('/api/recovery/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
     
-    console.log('📅 Fetching recovery for date:', date);
-    
-    // V2 API uses query parameters with ISO timestamps
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
     
@@ -220,10 +169,8 @@ app.get('/api/recovery/:date?', async (req, res) => {
     });
 
     const records = response.data.records || [];
-    console.log(`📊 Found ${records.length} recovery records`);
-    
     if (records.length === 0) {
-      return res.status(404).json({ error: 'No recovery data for this date' });
+      return res.status(404).json({ error: 'No recovery data for this date', date });
     }
 
     const data = records[0];
@@ -232,66 +179,23 @@ app.get('/api/recovery/:date?', async (req, res) => {
       recoveryScore: data.score?.recovery_score || null,
       hrv: data.score?.hrv_rmssd_milli || null,
       restingHeartRate: data.score?.resting_heart_rate || null,
-      spo2: data.score?.spo2_percentage || null,
-      skinTemp: data.score?.skin_temp_celsius || null
+      spo2: data.score?.spo2_percentage || null
     });
   } catch (err) {
-    console.error('❌ Recovery error:', err.response?.data || err.message);
+    console.error('Recovery error:', err.response?.status, err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
-      error: 'Failed to fetch recovery', 
+      error: 'Failed to fetch recovery',
+      status: err.response?.status,
       details: err.response?.data || err.message 
     });
   }
 });
 
-app.get('/api/sleep/:date?', async (req, res) => {
-  try {
-    const date = req.params.date || new Date().toISOString().split('T')[0];
-    const accessToken = await getValidAccessToken();
-    
-    console.log('📅 Fetching sleep for date:', date);
-    
-    const start = `${date}T00:00:00.000Z`;
-    const end = `${date}T23:59:59.999Z`;
-    
-    const response = await axios.get('https://api.prod.whoop.com/v2/activity/sleep', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { start, end, limit: 1 }
-    });
-
-    const records = response.data.records || [];
-    console.log(`📊 Found ${records.length} sleep records`);
-    
-    if (records.length === 0) {
-      return res.status(404).json({ error: 'No sleep data for this date' });
-    }
-
-    const data = records[0];
-    res.json({
-      date,
-      sleepPerformance: data.score?.sleep_performance_percentage || null,
-      sleepEfficiency: data.score?.sleep_efficiency_percentage || null,
-      sleepConsistency: data.score?.sleep_consistency_percentage || null,
-      respiratoryRate: data.score?.respiratory_rate || null,
-      deepSleep: data.score?.stage_summary?.slow_wave_sleep_duration_milli || null,
-      remSleep: data.score?.stage_summary?.rem_sleep_duration_milli || null,
-      lightSleep: data.score?.stage_summary?.light_sleep_duration_milli || null
-    });
-  } catch (err) {
-    console.error('❌ Sleep error:', err.response?.data || err.message);
-    res.status(err.response?.status || 500).json({ 
-      error: 'Failed to fetch sleep', 
-      details: err.response?.data || err.message 
-    });
-  }
-});
-
+// Get strain by date
 app.get('/api/strain/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
-    
-    console.log('📅 Fetching strain for date:', date);
     
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
@@ -302,10 +206,8 @@ app.get('/api/strain/:date?', async (req, res) => {
     });
 
     const records = response.data.records || [];
-    console.log(`📊 Found ${records.length} cycle records`);
-    
     if (records.length === 0) {
-      return res.status(404).json({ error: 'No cycle data for this date' });
+      return res.status(404).json({ error: 'No cycle data for this date', date });
     }
 
     const data = records[0];
@@ -317,51 +219,46 @@ app.get('/api/strain/:date?', async (req, res) => {
       maxHeartRate: data.score?.max_heart_rate || null
     });
   } catch (err) {
-    console.error('❌ Strain error:', err.response?.data || err.message);
+    console.error('Strain error:', err.response?.status, err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
-      error: 'Failed to fetch strain', 
+      error: 'Failed to fetch strain',
+      status: err.response?.status,
       details: err.response?.data || err.message 
     });
   }
 });
 
-app.get('/api/workouts/:date?', async (req, res) => {
+// Get sleep by date
+app.get('/api/sleep/:date?', async (req, res) => {
   try {
     const date = req.params.date || new Date().toISOString().split('T')[0];
     const accessToken = await getValidAccessToken();
     
-    console.log('📅 Fetching workouts for date:', date);
-    
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
     
-    const response = await axios.get('https://api.prod.whoop.com/v2/activity/workout', {
+    const response = await axios.get('https://api.prod.whoop.com/v2/activity/sleep', {
       headers: { Authorization: `Bearer ${accessToken}` },
-      params: { start, end }
+      params: { start, end, limit: 1 }
     });
 
-    const workouts = response.data.records || [];
-    console.log(`📊 Found ${workouts.length} workout records`);
-    
+    const records = response.data.records || [];
+    if (records.length === 0) {
+      return res.status(404).json({ error: 'No sleep data for this date', date });
+    }
+
+    const data = records[0];
     res.json({
       date,
-      workouts: workouts.map(w => ({
-        id: w.id,
-        sportName: w.sport_name,
-        sportId: w.sport_id,
-        duration: Math.round((new Date(w.end) - new Date(w.start)) / 60000),
-        strain: w.score?.strain || null,
-        averageHeartRate: w.score?.average_heart_rate || null,
-        maxHeartRate: w.score?.max_heart_rate || null,
-        calories: w.score?.kilojoule ? Math.round(w.score.kilojoule / 4.184) : null,
-        distance: w.score?.distance_meter || null,
-        startTime: w.start
-      }))
+      sleepPerformance: data.score?.sleep_performance_percentage || null,
+      sleepEfficiency: data.score?.sleep_efficiency_percentage || null,
+      respiratoryRate: data.score?.respiratory_rate || null
     });
   } catch (err) {
-    console.error('❌ Workouts error:', err.response?.data || err.message);
+    console.error('Sleep error:', err.response?.status, err.response?.data || err.message);
     res.status(err.response?.status || 500).json({ 
-      error: 'Failed to fetch workouts', 
+      error: 'Failed to fetch sleep',
+      status: err.response?.status,
       details: err.response?.data || err.message 
     });
   }
@@ -375,10 +272,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// =======================
-// START SERVER
-// =======================
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ WHOOP backend (V2 API) running on port ${PORT}`);
-  console.log(`📍 Redirect URI: ${REDIRECT_URI}`);
+  console.log(`✅ WHOOP backend running on port ${PORT}`);
 });
